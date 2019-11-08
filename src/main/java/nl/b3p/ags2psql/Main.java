@@ -1,10 +1,12 @@
 package nl.b3p.ags2psql;
 
 import java.io.IOException;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.commons.cli.*;
@@ -12,9 +14,12 @@ import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.ResponseHandler;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.methods.RequestBuilder;
 import org.apache.http.conn.ssl.SSLContextBuilder;
+import org.apache.http.conn.ssl.TrustStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
@@ -130,7 +135,13 @@ public class Main {
     private static CloseableHttpClient createHttpClient() throws Exception {
         HttpClientBuilder builder = HttpClients.custom();
         if(!verifySsl) {
-            builder.setSslcontext(new SSLContextBuilder().loadTrustMaterial(null, (X509Certificate[] xcs, String string) -> true).build());
+            builder.setSslcontext(new SSLContextBuilder().loadTrustMaterial(null, new TrustStrategy() {
+                @Override
+                public boolean isTrusted(X509Certificate[] xcs, String string) throws CertificateException {
+                    return true;
+                }
+
+            }).build());
         }
         return builder.build();
     }
@@ -144,11 +155,14 @@ public class Main {
         final HttpUriRequest req = builder.build();
 
         try(CloseableHttpClient client = createHttpClient()) {
-            final String content = client.execute(req, (HttpResponse hr) -> {
-                try {
-                    return IOUtils.toString(hr.getEntity().getContent(), "UTF-8");
-                } catch(IOException e) {
-                    return "Exception " + e.getClass() + ": " + e.getMessage();
+            final String content = client.execute(req, new ResponseHandler<String>() {
+                @Override
+                public String handleResponse(HttpResponse hr) throws ClientProtocolException, IOException {
+                    try {
+                        return IOUtils.toString(hr.getEntity().getContent(), "UTF-8");
+                    } catch(IOException e) {
+                        return "Exception " + e.getClass() + ": " + e.getMessage();
+                    }
                 }
             });
 
@@ -164,20 +178,23 @@ public class Main {
                 .addParameter("f", "json")
                 .addParameter("token", agsToken);
         if(params != null) {
-            params.entrySet().forEach((param) -> {
+            for(Map.Entry<String,String> param: params.entrySet()) {
                 builder.addParameter(param.getKey(), param.getValue());
-            });
+            };
         }
         final HttpUriRequest req = builder.build();
 
         try(CloseableHttpClient client = createHttpClient()) {
             final MutableBoolean hasException = new MutableBoolean(false);
-            final String content = client.execute(req, (HttpResponse hr) -> {
-                try {
-                    return IOUtils.toString(hr.getEntity().getContent(), "UTF-8");
-                } catch(IOException e) {
-                    hasException.setTrue();
-                    return "Exception " + e.getClass() + ": " + e.getMessage();
+            final String content = client.execute(req, new ResponseHandler<String>() {
+                @Override
+                public String handleResponse(HttpResponse hr) throws ClientProtocolException, IOException {
+                    try {
+                        return IOUtils.toString(hr.getEntity().getContent(), "UTF-8");
+                    } catch(IOException e) {
+                        hasException.setTrue();
+                        return "Exception " + e.getClass() + ": " + e.getMessage();
+                    }
                 }
             });
 
@@ -202,7 +219,7 @@ public class Main {
     }
 
     private static void cmdConvertTables(Connection c, String url, String[] tables) throws Exception {
-        System.err.println("Converting tables: " + String.join(", ", tables));
+        System.err.println("Converting tables: " + Arrays.toString(tables));
 
         JSONArray serviceTables = agsInfo.optJSONArray("tables");
 
